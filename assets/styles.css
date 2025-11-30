@@ -181,11 +181,11 @@ div[data-testid="stMetric"] {
   padding: 0 !important;
 }
 div[data-testid="stMetric"] [data-testid="stMetricLabel"] {
-  font-size: var(--font-small) !important;
+  font-size: var(--font-base) !important;
   color: var(--muted) !important;
 }
 div[data-testid="stMetric"] [data-testid="stMetricValue"] {
-  font-size: var(--font-h2) !important;
+  font-size: var(--font-base) !important;
   line-height: 1.2 !important;
   color: var(--text) !important;
 }

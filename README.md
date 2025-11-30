@@ -9,6 +9,9 @@ AI-powered prototype for analyzing SaaS contracts using ASC 606 revenue recognit
 - Complete ASC 606 analysis (all 5 steps)
 - Revenue recognition schedule generation
 - Interactive dashboard with PDF preview
+- **Edit contract details and obligations directly in the UI if extraction is incomplete or incorrect, then re-run the analysis with your changes**
+- Multi-obligation support: Handles contracts with multiple performance obligations and displays allocations in a styled, accessible table
+- Consistent, accessible UI: Custom dark theme, visually consistent tables, and primary action buttons
 
 ## Prerequisites
 
@@ -58,9 +61,10 @@ The app will open in your browser at `http://localhost:8501`
 
 1. Provide your Google Gemini API key via environment variable `GEMINI_API_KEY` or enter it in the app when prompted.
 2. Upload a SaaS contract PDF (max 20MB).
-3. Click "Analyze Contract with AI" to extract key terms and run the ASC 606 analysis in one step.
+3. Click **Analyze Contract with AI** to extract key terms and run the ASC 606 analysis in one step.
 4. Review contract details, the 5 ASC 606 steps, and the generated revenue schedule.
-5. Optionally, download the revenue schedule as CSV.
+5. If any contract details are missing or incorrect, click **Edit Details** in the Contract Details tab, update fields and obligations as needed, then click **Save and re-run analysis** to update the revenue schedule and analysis.
+6. Optionally, download the revenue schedule as CSV.
 
 ## Tech Stack
 

@@ -5,6 +5,7 @@ import base64
 import os
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import logging
 from typing import Optional
 
@@ -134,15 +135,28 @@ def get_pdf_display_html(pdf_path: str) -> str:
         base64_pdf = base64.b64encode(f.read()).decode('utf-8')
     return f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="1000" type="application/pdf"></iframe>'
 
-# Initialize session state
-if 'contract_text' not in st.session_state:
-    st.session_state.contract_text = None
-if 'contract_type_info' not in st.session_state:
-    st.session_state.contract_type_info = None
-if 'extracted_data' not in st.session_state:
-    st.session_state.extracted_data = None
-if 'asc606_analysis' not in st.session_state:
-    st.session_state.asc606_analysis = None
+
+
+# Helper: Format currency values consistently
+def _format_currency(value):
+    try:
+        value_float = float(str(value).replace(',', ''))
+        return f"${value_float:,.2f}"
+    except Exception:
+        return str(value) if value not in [None, '', 0] else 'N/A'
+
+# Helper: Initialize session state keys if missing
+def _init_session_state(keys_defaults):
+    for key, default in keys_defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = default
+
+_init_session_state({
+    'contract_text': None,
+    'contract_type_info': None,
+    'extracted_data': None,
+    'asc606_analysis': None
+})
 
 # Check if API key is set
 _render_topbar(bool(api_key))
@@ -305,38 +319,158 @@ if uploaded_file is not None:
         
         # Display results in tabs
         if st.session_state.extracted_data:
+
             tab1, tab2 = st.tabs(["Contract Details", "ASC 606 Analysis"])
-            
+
+            # Use edited data if available, else extracted
+            data = st.session_state.get('edited_contract_data') or st.session_state.extracted_data
+
             with tab1:
-                data = st.session_state.extracted_data
-                
-                # Display in a compact format
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.metric("Customer", data.get('customer_name', 'N/A'))
-                    st.metric("Start", data.get('contract_start_date', 'N/A'))
-                    
-                    # Handle total value with better error handling
-                    total_value = data.get('total_contract_value', 0)
-                    try:
-                        if total_value and str(total_value).replace(',', '').replace('.', '').isdigit():
-                            total_value_float = float(str(total_value).replace(',', ''))
-                            st.metric("Total Value", f"${total_value_float:,.2f}")
-                        else:
-                            st.metric("Total Value", str(total_value) if total_value else 'N/A')
-                    except (ValueError, TypeError):
-                        st.metric("Total Value", str(total_value) if total_value else 'N/A')
-                
-                with col_b:
-                    st.metric("Vendor", data.get('vendor_name', 'N/A'))
-                    st.metric("End", data.get('contract_end_date', 'N/A'))
-                    st.metric("Terms", data.get('payment_terms', 'N/A'))
-                
-                # Performance obligations
-                if data.get('performance_obligations'):
-                    st.markdown("**Obligations:**")
-                    for i, po in enumerate(data.get('performance_obligations', []), 1):
-                        st.caption(f"{i}. {po}")
+                if 'edit_mode' not in st.session_state:
+                    st.session_state.edit_mode = False
+
+                if not st.session_state.edit_mode:
+                    # Display contract details (read-only)
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        st.metric("Customer", data.get('customer_name', 'N/A'))
+                        st.metric("Start", data.get('contract_start_date', 'N/A'))
+                        total_value = data.get('total_contract_value', 0)
+                        st.metric("Total Value", _format_currency(total_value))
+                    with col_b:
+                        st.metric("Vendor", data.get('vendor_name', 'N/A'))
+                        st.metric("End", data.get('contract_end_date', 'N/A'))
+                        st.metric("Terms", data.get('payment_terms', 'N/A'))
+
+                    if data.get('performance_obligations'):
+                        st.markdown("**Obligations:**")
+                        for i, po in enumerate(data.get('performance_obligations', []), 1):
+                            st.caption(f"{i}. {po}")
+
+                    obligations = data.get('obligations')
+                    if obligations and isinstance(obligations, list) and len(obligations) > 0:
+                        st.markdown("**Obligation Allocations:**")
+                        obligations_table = []
+                        for idx, ob in enumerate(obligations, 1):
+                            name = ob.get('name', 'N/A')
+                            desc = ob.get('description', '')
+                            value = ob.get('allocated_value', 0)
+                            value_str = _format_currency(value)
+                            obligations_table.append((str(idx), name, desc, value_str))
+                        table_html = """
+                        <style>
+                        .obligation-table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            font-size: 14px;
+                            color: #c9d1d9;
+                            background: none;
+                        }
+                        .obligation-table th, .obligation-table td {
+                            border: 0.5px solid #363636;
+                            padding: 3px 6px;
+                            text-align: left;
+                            background: none;
+                            color: #c9d1d9;
+                        }
+                        .obligation-table th {
+                            background: #121821;
+                            font-weight: 600;
+                            color: #c9d1d9;
+                        }
+                        </style>
+                        <table class="obligation-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Obligation</th>
+                                    <th>Description</th>
+                                    <th>Allocated Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                        """
+                        for row in obligations_table:
+                            table_html += f"<tr><td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td><td>{row[3]}</td></tr>"
+                        table_html += "</tbody></table>"
+                        st.markdown(table_html, unsafe_allow_html=True)
+
+                    # Edit button
+                    if st.button("Edit Details", key="edit_details_btn"):
+                        st.session_state.edit_mode = True
+                        st.session_state.edited_contract_data = data.copy()
+                        st.rerun()
+
+                else:
+                    # Edit mode: show input fields
+                    edited = st.session_state.get('edited_contract_data', {}).copy()
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        edited['customer_name'] = st.text_input("Customer", value=edited.get('customer_name', ''))
+                        edited['contract_start_date'] = st.text_input("Start Date (YYYY-MM-DD)", value=edited.get('contract_start_date', ''))
+                        edited['total_contract_value'] = st.text_input("Total Value", value=str(edited.get('total_contract_value', '')))
+                    with col_b:
+                        edited['vendor_name'] = st.text_input("Vendor", value=edited.get('vendor_name', ''))
+                        edited['contract_end_date'] = st.text_input("End Date (YYYY-MM-DD)", value=edited.get('contract_end_date', ''))
+                        edited['payment_terms'] = st.text_input("Terms", value=edited.get('payment_terms', ''))
+
+                    # Obligations (simple editable list)
+                    st.markdown("**Obligations (comma separated):**")
+                    perf_ob_str = ', '.join(edited.get('performance_obligations', [])) if isinstance(edited.get('performance_obligations', []), list) else ''
+                    perf_ob_str = st.text_input("Performance Obligations", value=perf_ob_str)
+                    edited['performance_obligations'] = [s.strip() for s in perf_ob_str.split(',')] if perf_ob_str else []
+
+                    # Obligations with allocated value (simple table)
+                    obligations = edited.get('obligations', [])
+                    st.markdown("**Obligation Allocations:** (edit below)")
+                    new_obligations = []
+                    for idx, ob in enumerate(obligations, 1):
+                        # Use equal width columns for consistency
+                        cols = st.columns(4)
+                        name = cols[0].text_input(f"Obligation Name {idx}", value=ob.get('name', ''), key=f"ob_name_{idx}")
+                        desc = cols[1].text_input(f"Description {idx}", value=ob.get('description', ''), key=f"ob_desc_{idx}")
+                        value = cols[2].text_input(f"Allocated Value {idx}", value=str(ob.get('allocated_value', '')), key=f"ob_val_{idx}")
+                        # Helper: Format currency values consistently
+                        def _format_currency(value):
+                            try:
+                                value_float = float(str(value).replace(',', ''))
+                                return f"${value_float:,.2f}"
+                            except Exception:
+                                return str(value) if value not in [None, '', 0] else 'N/A'
+                        # Add a blank column for spacing/alignment if needed
+                        _ = cols[3].markdown("")
+                        new_obligations.append({'name': name, 'description': desc, 'allocated_value': value})
+                    edited['obligations'] = new_obligations
+
+                    # Save and re-run analysis button, plus cancel
+                    run_col, cancel_col = st.columns([2,1])
+                    # Ensure consistent button width with custom CSS
+                    st.markdown("""
+                        <style>
+                        .stButton > button#save_rerun_btn {
+                            min-width: 220px;
+                        }
+                        </style>
+                    """, unsafe_allow_html=True)
+                    with run_col:
+                        if st.button("Save and re-run analysis", key="save_rerun_btn", type="primary"):
+                            st.session_state.edited_contract_data = edited
+                            st.session_state.edit_mode = False
+                            st.session_state.extracted_data = edited
+                            st.session_state.asc606_analysis = None
+                            import json
+                            try:
+                                result = extract_and_analyze_combined(json.dumps(edited))
+                                st.session_state.extracted_data = result['contract_info']
+                                st.session_state.asc606_analysis = result['asc606_analysis']
+                                st.success("Analysis complete with edited details!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Analysis failed: {str(e)}")
+                    with cancel_col:
+                        if st.button("Cancel", key="cancel_edit_btn"):
+                            st.session_state.edit_mode = False
+                            st.rerun()
             
             with tab2:
                 if st.session_state.asc606_analysis:
@@ -356,38 +490,174 @@ if uploaded_file is not None:
                     if 'revenue_schedule' in analysis:
                         st.markdown("---")
                         st.markdown("**Revenue Schedule**")
-                        
                         schedule_df = pd.DataFrame(analysis['revenue_schedule'])
-                        
                         if len(schedule_df) > 0 and 'error' not in schedule_df.columns:
-                            st.dataframe(schedule_df, use_container_width=True, hide_index=True, height=200)
-                            # Download CSV
+                            # Identify obligation-specific columns
+                            obligation_cols = [col for col in schedule_df.columns if col.startswith('revenue_') and col != 'revenue_amount']
+                            
+                            # Show multi-obligation summary if applicable
+                            if obligation_cols:
+                                st.info(f"📊 Multi-obligation contract with {len(obligation_cols)} performance obligations")
+                            
+                            # Reorder columns for better display
+                            base_cols = ['period', 'period_start', 'period_end']
+                            display_cols = base_cols + obligation_cols + ['revenue_amount', 'deferred_revenue']
+                            # Keep only columns that exist
+                            display_cols = [col for col in display_cols if col in schedule_df.columns]
+                            # Add any remaining columns not already included
+                            remaining_cols = [col for col in schedule_df.columns if col not in display_cols]
+                            display_cols.extend(remaining_cols)
+                            
+                            display_df = schedule_df[display_cols].copy()
+                            
+                            # Format currency columns for display
+                            currency_cols = ['revenue_amount', 'deferred_revenue'] + obligation_cols
+                            for col in currency_cols:
+                                if col in display_df.columns:
+                                    display_df[col] = display_df[col].apply(lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x)
+                            
+                            # Configure column display settings to ensure all columns are visible
+                            column_config = {}
+                            for col in display_df.columns:
+                                if col.startswith('revenue_'):
+                                    # Make revenue columns more prominent
+                                    column_config[col] = st.column_config.TextColumn(
+                                        col.replace('revenue_', '').replace('_', ' ').title(),
+                                        width="medium",
+                                        help=f"Revenue for {col.replace('revenue_', '')}"
+                                    )
+                                elif col == 'deferred_revenue':
+                                    column_config[col] = st.column_config.TextColumn(
+                                        "Deferred Revenue",
+                                        width="medium"
+                                    )
+                            
+                            # Display the dataframe with all columns and custom config
+                            st.dataframe(
+                                display_df,
+                                use_container_width=True,
+                                hide_index=True,
+                                height=min(400, len(display_df) * 35 + 38),
+                                column_config=column_config
+                            )
+                            
+                            # Download CSV with raw numbers
                             csv_data = schedule_df.to_csv(index=False).encode('utf-8')
                             st.download_button(
-                                label="Download Revenue Schedule (CSV)",
+                                label="📥 Download Revenue Schedule (CSV)",
                                 data=csv_data,
                                 file_name="revenue_schedule.csv",
                                 mime="text/csv",
                                 use_container_width=True,
                             )
                             
-                            # Compact visualization
-                            fig = px.bar(
-                                schedule_df,
-                                x='period',
-                                y='revenue_amount',
-                                labels={'period': 'Period', 'revenue_amount': 'Revenue ($)'}
+                            # Enhanced visualization
+                            st.markdown("**Revenue Visualization**")
+                            
+                            # Let user choose what to visualize
+                            viz_type = st.radio(
+                                "Visualization type:",
+                                ["Stacked", "Grouped", "Line Chart"],
+                                horizontal=True,
+                                help="Choose how to display revenue data"
                             )
-                            fig.update_layout(
-                                showlegend=False,
-                                height=250,
-                                margin=dict(l=0, r=0, t=20, b=0)
+                            
+                            # Column selection for visualization
+                            all_revenue_cols = obligation_cols + ['revenue_amount']
+                            default_cols = ['revenue_amount'] if 'revenue_amount' in all_revenue_cols else obligation_cols[:1]
+                            
+                            selected_cols = st.multiselect(
+                                "Select revenue columns to visualize:",
+                                all_revenue_cols,
+                                default=default_cols if obligation_cols else ['revenue_amount']
                             )
-                            st.plotly_chart(fig, use_container_width=True)
+                            
+                            if selected_cols:
+                                # Create visualization based on type
+                                if viz_type == "Stacked":
+                                    fig = px.bar(
+                                        schedule_df,
+                                        x='period',
+                                        y=selected_cols,
+                                        labels={'period': 'Period', 'value': 'Revenue', 'variable': 'Obligation'},
+                                        title="Revenue Recognition by Period"
+                                    )
+                                    fig.update_layout(
+                                        barmode='stack',
+                                        height=400,
+                                        margin=dict(l=0, r=0, t=40, b=0),
+                                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                                    )
+                                    
+                                elif viz_type == "Grouped":
+                                    fig = px.bar(
+                                        schedule_df,
+                                        x='period',
+                                        y=selected_cols,
+                                        labels={'period': 'Period', 'value': 'Revenue', 'variable': 'Obligation'},
+                                        title="Revenue Recognition by Period"
+                                    )
+                                    fig.update_layout(
+                                        barmode='group',
+                                        height=400,
+                                        margin=dict(l=0, r=0, t=40, b=0),
+                                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                                    )
+                                    
+                                else:  # Line Chart
+                                    fig = go.Figure()
+                                    for col in selected_cols:
+                                        fig.add_trace(go.Scatter(
+                                            x=schedule_df['period'],
+                                            y=schedule_df[col],
+                                            mode='lines+markers',
+                                            name=col.replace('revenue_', '').replace('_', ' ').title(),
+                                            line=dict(width=3),
+                                            marker=dict(size=8)
+                                        ))
+                                    
+                                    fig.update_layout(
+                                        title="Revenue Recognition Trend",
+                                        xaxis_title="Period",
+                                        yaxis_title="Revenue",
+                                        height=400,
+                                        margin=dict(l=0, r=0, t=40, b=0),
+                                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                                        hovermode='x unified'
+                                    )
+                                
+                                st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Add deferred revenue chart if available
+                                if 'deferred_revenue' in schedule_df.columns:
+                                    with st.expander("View Deferred Revenue", expanded=False):
+                                        fig_deferred = go.Figure()
+                                        fig_deferred.add_trace(go.Scatter(
+                                            x=schedule_df['period'],
+                                            y=schedule_df['deferred_revenue'],
+                                            mode='lines+markers',
+                                            name='Deferred Revenue',
+                                            fill='tozeroy',
+                                            line=dict(color='#FF6B6B', width=3),
+                                            marker=dict(size=8)
+                                        ))
+                                        
+                                        fig_deferred.update_layout(
+                                            title="Deferred Revenue Over Time",
+                                            xaxis_title="Period",
+                                            yaxis_title="Deferred Revenue",
+                                            height=300,
+                                            margin=dict(l=0, r=0, t=40, b=0),
+                                            hovermode='x unified'
+                                        )
+                                        
+                                        st.plotly_chart(fig_deferred, use_container_width=True)
                         else:
                             st.warning("Unable to generate revenue schedule")
                 else:
-                    st.info("Complete the contract analysis to view ASC 606 breakdown")    # Right column - Document Viewer (always visible when file is uploaded)
+                    st.info("Complete the contract analysis to view ASC 606 breakdown")
+    
+    # Right column - Document Viewer (always visible when file is uploaded)
     with col_right:
         # Display PDF using cached function
         try:
@@ -425,7 +695,7 @@ else:
             **What you'll get:**
             - Automated contract data extraction
             - Complete ASC 606 compliance analysis
-            - Revenue recognition schedule
+            - Revenue recognition schedule with multi-obligation support
             - Interactive visualizations
             """)
 

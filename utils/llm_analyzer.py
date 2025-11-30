@@ -1,6 +1,6 @@
 """
 LLM interaction using Google Gemini API for contract analysis
-Enhanced with better error handling, validation, and rate limiting
+Enhanced with multi-obligation support for ASC 606 compliance
 """
 import google.generativeai as genai
 import json
@@ -270,7 +270,7 @@ def _extract_json_object(text: str) -> Optional[str]:
 def extract_and_analyze_combined(contract_text: str) -> Dict[str, Any]:
     """
     Combined extraction and analysis in a single LLM call for better performance.
-    Enhanced with better error handling and validation.
+    Enhanced with multi-obligation support for proper ASC 606 revenue recognition.
     
     Args:
         contract_text: Full text extracted from the contract PDF
@@ -308,7 +308,30 @@ Return valid JSON with this EXACT structure:
         "contract_end_date": "YYYY-MM-DD format - extract the actual end/termination date from the contract",
         "total_contract_value": 0,
         "payment_terms": "monthly/annual/quarterly (required)",
-        "performance_obligations": ["list", "of", "distinct", "services"]
+        "performance_obligations": ["list", "of", "distinct", "services"],
+        "pricing_schedule": [
+            {{
+                "period_start": "YYYY-MM-DD",
+                "period_end": "YYYY-MM-DD",
+                "period_value": 120000,
+                "frequency": "monthly"
+            }}
+        ],
+        "obligations": [
+            {{
+                "name": "software_license",
+                "description": "Brief description of the obligation",
+                "allocated_value": 50000,
+                "recognition": "over_time",
+                "pricing_schedule": [
+                    {{
+                        "period_start": "YYYY-MM-DD",
+                        "period_end": "YYYY-MM-DD",
+                        "period_value": 60000
+                    }}
+                ]
+            }}
+        ]
     }},
     "asc606_analysis": {{
         "step_1": {{
@@ -329,7 +352,7 @@ Return valid JSON with this EXACT structure:
         "step_4": {{
             "title": "Allocate Transaction Price",
             "description": "Allocation methodology and SSP considerations", 
-            "details": ["allocation to obligation 1", "allocation to obligation 2"]
+            "details": ["allocation to obligation 1: $X", "allocation to obligation 2: $Y"]
         }},
         "step_5": {{
             "title": "Recognize Revenue",
@@ -339,14 +362,76 @@ Return valid JSON with this EXACT structure:
     }}
 }}
 
-Critical Requirements:
-- All dates must be in YYYY-MM-DD format
-- total_contract_value must be a numeric value (no currency symbols)
-- Each step must have title, description, and details array
-- Respond ONLY with valid JSON, no additional text"""
+CRITICAL EXTRACTION RULES - DO NOT INVENT INFORMATION:
+
+1. ONLY extract information that is EXPLICITLY stated in the contract text
+2. If information is not found, use "Unable to identify" for text fields or 0 for numeric fields
+3. DO NOT infer, assume, estimate, or calculate values that are not explicitly written
+4. DO NOT use typical industry values or make educated guesses
+5. If dates are written in words (e.g., "first day of January 2024"), convert to YYYY-MM-DD format
+6. If dates are ambiguous or missing, use "Unable to identify"
+7. For total_contract_value, ONLY use explicitly stated total amounts - do not calculate by adding line items
+
+PRICING SCHEDULE EXTRACTION (CRITICAL FOR VARIABLE PRICING):
+
+The "pricing_schedule" field captures variable pricing over time. This is CRITICAL for contracts with:
+
+Rules:
+1. Look for pricing tables, schedules, or sections that show different prices for different time periods
+2. Each entry must include:
+   - "period_start": Start date in YYYY-MM-DD format
+   - "period_end": End date in YYYY-MM-DD format
+   - "period_value": Total value for that specific period (e.g., annual fee for Year 1)
+   - "frequency": "monthly", "annual", or "quarterly" - how revenue should be recognized within this period
+
+3. ONLY include pricing_schedule if the contract EXPLICITLY shows different pricing for different periods
+4. If pricing is flat/consistent, omit the pricing_schedule field entirely
+
+Example from a contract with variable pricing:
+"Year 1 (Jan 1, 2024 - Dec 31, 2024): $120,000
+ Year 2 (Jan 1, 2025 - Dec 31, 2025): $132,000"
+ 
+Should become:
+"pricing_schedule": [
+    {{"period_start": "2024-01-01", "period_end": "2024-12-31", "period_value": 120000, "frequency": "monthly"}},
+    {{"period_start": "2025-01-01", "period_end": "2025-12-31", "period_value": 132000, "frequency": "monthly"}}
+]
+
+OBLIGATIONS EXTRACTION RULES:
+
+1. The "obligations" array is OPTIONAL - only include it if the contract CLEARLY separates multiple distinct obligations with allocated pricing
+2. Each obligation must have:
+   - "name": lowercase with underscores, derived from actual contract language (e.g., "software_license", "implementation", "training")
+   - "description": brief explanation using actual contract terms
+   - "allocated_value": ONLY use values explicitly stated in the contract for each obligation (total across all periods)
+   - "recognition": one of "over_time", "point_in_time", or "upfront"
+   - "recognition_period": (optional, only for point_in_time) which month to recognize (e.g., 2 for month 2)
+   - "pricing_schedule": (optional) if THIS SPECIFIC obligation has variable pricing across periods
+
+3. Common obligation patterns (ONLY if explicitly stated in contract):
+   - Software subscription/license → "over_time" (recognize evenly over contract)
+   - Implementation/setup → "point_in_time" (recognize when complete, usually month 1-2)
+   - Training → "point_in_time" (recognize when delivered)
+   - Support → "over_time" (recognize evenly over support period)
+   - Hardware → "point_in_time" (recognize at delivery)
+
+4. DO NOT create obligations array if:
+   - The contract only mentions one service/product
+   - Pricing is not broken down by obligation
+   - You would need to estimate or allocate the total value yourself
+
+5. If an obligation has variable pricing (e.g., software license with annual increases), include a pricing_schedule within that obligation
+
+6. The allocated values must EXACTLY match values stated in the contract and sum to total_contract_value
+
+VALIDATION CHECKLIST BEFORE RESPONDING:
+
+ASC 606 ANALYSIS RULES:
+
+Respond ONLY with valid JSON, no additional text."""
 
     logger.info("\n--- PROMPT SENT TO LLM ---")
-    logger.info(prompt[:500] + "..." if len(prompt) > 500 else prompt)
+    logger.info(prompt[:800] + "..." if len(prompt) > 800 else prompt)
     logger.info("--- END PROMPT ---\n")
 
     try:
@@ -369,6 +454,12 @@ Critical Requirements:
         logger.info(f"Value: ${contract_info.get('total_contract_value', 'N/A')}")
         logger.info(f"Start: {contract_info.get('contract_start_date', 'N/A')}")
         logger.info(f"End: {contract_info.get('contract_end_date', 'N/A')}")
+        
+        # Log obligations if present
+        if 'obligations' in contract_info and contract_info['obligations']:
+            logger.info(f"Obligations: {len(contract_info['obligations'])} found")
+            for ob in contract_info['obligations']:
+                logger.info(f"  - {ob.get('name')}: ${ob.get('allocated_value')} ({ob.get('recognition')})")
         logger.info("--- END CONTRACT INFO ---\n")
         
         # Generate revenue schedule
@@ -388,6 +479,18 @@ Critical Requirements:
         logger.error(f"✗ Error during analysis: {str(e)}", exc_info=True)
         raise Exception(f"Combined analysis failed: {str(e)[:200]}...")
 
+        # Two-step: extract then analyze
+        contract_info = extract_contract_data(contract_text)
+        analysis = analyze_contract_data(contract_info)
+        # Generate revenue schedule
+        from utils.asc606_engine import generate_revenue_schedule
+        revenue_schedule = generate_revenue_schedule(contract_info)
+        analysis['asc606_analysis']['revenue_schedule'] = revenue_schedule
+        result = {
+            'contract_info': contract_info,
+            'asc606_analysis': analysis['asc606_analysis']
+        }
+        return result
 
 def _validate_combined_analysis_response(result: Dict[str, Any]) -> None:
     """Validate the structure and content of combined analysis response."""
@@ -419,6 +522,39 @@ def _validate_combined_analysis_response(result: Dict[str, Any]) -> None:
         elif not _is_valid_date_format(date_str):
             logger.warning(f"Invalid date format for {field}: {date_str} - marking as unable to identify")
             contract_info[field] = 'Unable to identify'
+    
+    # Validate obligations if present
+    if 'obligations' in contract_info and contract_info['obligations']:
+        obligations = contract_info['obligations']
+        if not isinstance(obligations, list):
+            logger.warning("obligations field is not a list, removing it")
+            del contract_info['obligations']
+        else:
+            # Validate each obligation structure
+            total_allocated = 0
+            valid_obligations = []
+            for ob in obligations:
+                if not isinstance(ob, dict):
+                    logger.warning(f"Invalid obligation (not a dict): {ob}")
+                    continue
+                
+                if 'name' not in ob or 'allocated_value' not in ob:
+                    logger.warning(f"Obligation missing required fields: {ob}")
+                    continue
+                
+                # Set default recognition if missing
+                if 'recognition' not in ob:
+                    ob['recognition'] = 'over_time'
+                
+                valid_obligations.append(ob)
+                total_allocated += float(ob.get('allocated_value', 0))
+            
+            contract_info['obligations'] = valid_obligations
+            
+            # Warn if allocation doesn't match total
+            total_value = float(contract_info.get('total_contract_value', 0))
+            if valid_obligations and abs(total_allocated - total_value) > 1:
+                logger.warning(f"Obligation allocation ({total_allocated}) doesn't match total value ({total_value})")
     
     # Validate ASC 606 analysis structure
     asc606 = result['asc606_analysis']
