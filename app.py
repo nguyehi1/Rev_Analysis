@@ -23,6 +23,12 @@ from utils.llm_analyzer import extract_and_analyze_combined, set_api_key, identi
 MAX_FILE_SIZE_MB = 20
 SUPPORTED_FILE_TYPES = ['pdf']
 
+# Chart configuration constants
+CHART_HEIGHT = 400
+CHART_MARGIN = dict(l=0, r=0, t=40, b=0)
+CHART_LEGEND = dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+DEFERRED_CHART_HEIGHT = 300
+
 # Page configuration
 st.set_page_config(
     page_title="ASC 606 Contract Analyzer",
@@ -358,27 +364,6 @@ if uploaded_file is not None:
                             value_str = _format_currency(value)
                             obligations_table.append((str(idx), name, desc, value_str))
                         table_html = """
-                        <style>
-                        .obligation-table {
-                            width: 100%;
-                            border-collapse: collapse;
-                            font-size: 14px;
-                            color: #c9d1d9;
-                            background: none;
-                        }
-                        .obligation-table th, .obligation-table td {
-                            border: 0.5px solid #363636;
-                            padding: 3px 6px;
-                            text-align: left;
-                            background: none;
-                            color: #c9d1d9;
-                        }
-                        .obligation-table th {
-                            background: #121821;
-                            font-weight: 600;
-                            color: #c9d1d9;
-                        }
-                        </style>
                         <table class="obligation-table">
                             <thead>
                                 <tr>
@@ -430,13 +415,6 @@ if uploaded_file is not None:
                         name = cols[0].text_input(f"Obligation Name {idx}", value=ob.get('name', ''), key=f"ob_name_{idx}")
                         desc = cols[1].text_input(f"Description {idx}", value=ob.get('description', ''), key=f"ob_desc_{idx}")
                         value = cols[2].text_input(f"Allocated Value {idx}", value=str(ob.get('allocated_value', '')), key=f"ob_val_{idx}")
-                        # Helper: Format currency values consistently
-                        def _format_currency(value):
-                            try:
-                                value_float = float(str(value).replace(',', ''))
-                                return f"${value_float:,.2f}"
-                            except Exception:
-                                return str(value) if value not in [None, '', 0] else 'N/A'
                         # Add a blank column for spacing/alignment if needed
                         _ = cols[3].markdown("")
                         new_obligations.append({'name': name, 'description': desc, 'allocated_value': value})
@@ -584,9 +562,9 @@ if uploaded_file is not None:
                                     )
                                     fig.update_layout(
                                         barmode='stack',
-                                        height=400,
-                                        margin=dict(l=0, r=0, t=40, b=0),
-                                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                                        height=CHART_HEIGHT,
+                                        margin=CHART_MARGIN,
+                                        legend=CHART_LEGEND
                                     )
                                     
                                 elif viz_type == "Grouped":
@@ -599,9 +577,9 @@ if uploaded_file is not None:
                                     )
                                     fig.update_layout(
                                         barmode='group',
-                                        height=400,
-                                        margin=dict(l=0, r=0, t=40, b=0),
-                                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                                        height=CHART_HEIGHT,
+                                        margin=CHART_MARGIN,
+                                        legend=CHART_LEGEND
                                     )
                                     
                                 else:  # Line Chart
@@ -620,9 +598,9 @@ if uploaded_file is not None:
                                         title="Revenue Recognition Trend",
                                         xaxis_title="Period",
                                         yaxis_title="Revenue",
-                                        height=400,
-                                        margin=dict(l=0, r=0, t=40, b=0),
-                                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                                        height=CHART_HEIGHT,
+                                        margin=CHART_MARGIN,
+                                        legend=CHART_LEGEND,
                                         hovermode='x unified'
                                     )
                                 
@@ -646,8 +624,8 @@ if uploaded_file is not None:
                                             title="Deferred Revenue Over Time",
                                             xaxis_title="Period",
                                             yaxis_title="Deferred Revenue",
-                                            height=300,
-                                            margin=dict(l=0, r=0, t=40, b=0),
+                                            height=DEFERRED_CHART_HEIGHT,
+                                            margin=CHART_MARGIN,
                                             hovermode='x unified'
                                         )
                                         

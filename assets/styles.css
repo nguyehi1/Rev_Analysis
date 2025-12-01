@@ -48,6 +48,30 @@ header[data-testid="stHeader"] {
   font-size: var(--font-base);
 }
 
+/* Obligation allocation table */
+.obligation-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  color: #c9d1d9;
+  background: none;
+}
+
+.obligation-table th,
+.obligation-table td {
+  border: 0.5px solid #363636;
+  padding: 3px 6px;
+  text-align: left;
+  background: none;
+  color: #c9d1d9;
+}
+
+.obligation-table th {
+  background: #121821;
+  font-weight: 600;
+  color: #c9d1d9;
+}
+
 /* Topbar - Full-width header */
 .topbar {
   position: fixed;

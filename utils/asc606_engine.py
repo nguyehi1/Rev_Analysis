@@ -10,6 +10,17 @@ Implements the 5-step model for revenue recognition with enhanced error handling
 
 logger = logging.getLogger(__name__)
 
+def _is_valid_yyyy_mm_dd(date_str: str) -> bool:
+    """Validate if a date string is in YYYY-MM-DD format."""
+    try:
+        if not date_str or date_str in ['Unable to identify', 'N/A']:
+            return False
+        datetime.strptime(date_str, '%Y-%m-%d')
+        return True
+    except Exception:
+        return False
+
+
 def validate_contract_data(contract_data: Dict[str, Any]) -> None:
     """Validate contract data before generating revenue schedule."""
     required_fields = ['contract_start_date', 'contract_end_date', 'total_contract_value', 'payment_terms']
@@ -31,14 +42,6 @@ def validate_contract_data(contract_data: Dict[str, Any]) -> None:
     # Validate dates only if both are present and in valid format
     start_date_str = str(contract_data.get('contract_start_date', '')).strip()
     end_date_str = str(contract_data.get('contract_end_date', '')).strip()
-    def _is_valid_yyyy_mm_dd(date_str):
-        try:
-            if not date_str or date_str in ['Unable to identify', 'N/A']:
-                return False
-            datetime.strptime(date_str, '%Y-%m-%d')
-            return True
-        except Exception:
-            return False
 
     if _is_valid_yyyy_mm_dd(start_date_str) and _is_valid_yyyy_mm_dd(end_date_str):
         start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
@@ -94,15 +97,6 @@ def generate_revenue_schedule(contract_data: Dict[str, Any]) -> List[Dict[str, A
         # Check if dates are available and valid
         start_date_str = str(contract_data.get('contract_start_date', '')).strip()
         end_date_str = str(contract_data.get('contract_end_date', '')).strip()
-
-        def _is_valid_yyyy_mm_dd(date_str):
-            try:
-                if not date_str or date_str in ['Unable to identify', 'N/A']:
-                    return False
-                datetime.strptime(date_str, '%Y-%m-%d')
-                return True
-            except Exception:
-                return False
 
         if not _is_valid_yyyy_mm_dd(start_date_str) or not _is_valid_yyyy_mm_dd(end_date_str):
             logger.warning(f"Invalid or missing contract dates: start='{start_date_str}', end='{end_date_str}' - cannot generate revenue schedule")
